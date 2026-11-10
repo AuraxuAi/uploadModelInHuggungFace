@@ -1,0 +1,63 @@
+# ~200M-param model, 5B-token mixed corpus:
+#   70% raw code (bigcode/the-stack-dedup, Python)
+#   10% Wikipedia (English)
+#   10% math (open-web-math)
+#   10% commit history (bigcode/commitpack, Python — real GitHub commits,
+#       <commit_before>/<commit_message>/<commit_after> format)
+#
+# This corpus is NOT streamed live during training — build it once locally
+# with scripts/build_data_mix.py (which shuffles chunks across all 4
+# sources so training sees a genuine mix from step one, avoiding
+# catastrophic forgetting from sequential domain training), then point
+# train_files at the single resulting .bin.
+#
+# 5B tokens / 200M params = ~25 tokens/param — slightly above the
+# ~20 tokens/param Chinchilla-style ratio, so this is a properly-trained
+# (not undertrained) model at this scale, not just a smoke test.
+
+model:
+  vocab_size: 32000      # must match your trained tokenizer exactly (tokenizer_mix50m_32k.json)
+  context_len: 512
+  n_layers: 14
+  n_heads: 16
+  n_kv_heads: 8
+  d_model: 1024
+  d_ff_mult: 2.67          # SwiGLU hidden ~ 8/3 x d_model; see model.num_parameters() to confirm exact count (~194M)
+  dropout: 0.1
+  attn_dropout: 0.05
+  rope_base: 10000
+  norm_eps: 1.0e-5
+  tie_weights: true
+
+data:
+  # Pre-built, pre-mixed corpus — NOT hf_dataset_name/train_files globbing
+  # raw sources directly, since the 4 sources need independent token-budget
+  # control and shuffling that only build_data_mix.py currently does.
+  train_files:
+    - "artifacts/mix_50m/corpus.bin"
+  val_fraction: 0.02
+  tokenizer_path: artifacts/tokenizer_mix50m_32k.json
+  tokenizer_vocab_size: 32000
+  cache_dir: artifacts/cache_mix50m
+
+train:
+  output_dir: artifacts/run_mix50m
+  seed: 42
+  batch_size: 4
+  grad_accum: 32           # effective batch = 128 sequences x 512 tokens = 65,536 tokens/step (unchanged)
+  max_steps: 76300          # ~1 epoch over 5B tokens at 65,536 tokens/step
+  warmup_steps: 300
+  eval_every: 250
+  save_every: 500
+  log_every: 50
+  lr: 4.0e-4
+  lr_min: 4.0e-5
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: 1.0
+  amp_dtype: fp16           # switch to bf16 only on Ampere+ GPUs (A100/H100), not T4
+  use_amp: true
+  num_workers: 4
+  use_wandb: false
+  keep_last_n_checkpoints: 3

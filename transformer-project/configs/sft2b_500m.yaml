@@ -1,0 +1,54 @@
+# ~2B-token fine-tuning of the pretrained 500M model: packed examples (loss on responses only) + 20% pretraining replay.
+#
+#   tp-train --config configs/run_sft2b.yaml --init-from <ckpt_final.pt>
+#
+# Data: scripts/build_sft_packed.py (several short examples per 2048-token row, so almost no padding).
+# max_steps is set by the notebook from the number of packed rows.
+# Learning rate: higher than for the small fine-tune (3e-5) because there is 30x more data, but still well below
+# the pretraining peak (3e-4): this should refine the model, not retrain it.
+
+model:
+  vocab_size: 32000      # must match the tokenizer you train on the new mix
+  context_len: 2048      # 512 is too short for code at this scale
+  n_layers: 26
+  n_heads: 20
+  n_kv_heads: 5
+  d_model: 1280
+  d_ff_mult: 4.0         # NOTE: SwiGLUFFN uses hidden = (2/3) * d_ff_mult * d_model, so 4.0
+                         # gives the standard ~8/3 * d_model. (The old 2.67 shrank it twice.)
+  dropout: 0.0           # ~1 epoch over 20B tokens: dropout only slows learning here
+  attn_dropout: 0.0
+  rope_base: 10000
+  norm_eps: 1.0e-5
+  tie_weights: true
+
+data:
+  sft_packed_prefix: artifacts/sft_packed/sft2b
+  token_dtype: uint16
+  replay_corpus: artifacts/mix_20b/corpus.bin
+  replay_fraction: 0.20                # 20% of all rows are ordinary pretraining chunks
+  tokenizer_path: artifacts/tokenizer_20b_32k.json
+  tokenizer_vocab_size: 32000
+  cache_dir: artifacts/cache_sft2b
+
+train:
+  output_dir: artifacts/run_sft2b_500m
+  seed: 42
+  batch_size: 8
+  grad_accum: 32                       # 256 rows x 2048 tokens = 524,288 tokens per step (same as pretraining)
+  max_steps: 3900                      # placeholder; the notebook computes it from the packed data
+  warmup_steps: 150
+  eval_every: 250
+  save_every: 250
+  log_every: 10
+  lr: 5.0e-5
+  lr_min: 5.0e-6
+  weight_decay: 0.01
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: 1.0
+  amp_dtype: bf16
+  use_amp: true
+  num_workers: 4
+  use_wandb: false
+  keep_last_n_checkpoints: 2

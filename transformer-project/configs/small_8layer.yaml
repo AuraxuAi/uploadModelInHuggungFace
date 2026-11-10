@@ -1,0 +1,49 @@
+# ~7.7M parameters (vocab=8000) / ~9.7M (vocab=16000).
+# Lightweight but real — sized for a Colab free-tier T4, not a CPU-only laptop.
+# Update data.tokenizer_vocab_size and model.vocab_size together if you change vocab.
+model:
+  vocab_size: 8000
+  context_len: 256
+  n_layers: 8
+  n_heads: 8
+  n_kv_heads: 2
+  d_model: 256
+  d_ff_mult: 4.0
+  dropout: 0.1
+  attn_dropout: 0.05
+  rope_base: 10000
+  norm_eps: 1.0e-5
+  tie_weights: true
+
+data:
+  train_files: []                 # fill in local files, OR:
+  hf_dataset_name: roneneldan/TinyStories
+  hf_dataset_split: train
+  hf_text_column: text
+  hf_max_samples: 300000
+  val_fraction: 0.03
+  tokenizer_path: artifacts/tokenizer.json
+  tokenizer_vocab_size: 8000
+  cache_dir: artifacts/cache
+
+train:
+  output_dir: artifacts/run_small8L
+  seed: 42
+  batch_size: 32
+  grad_accum: 2
+  max_steps: 15000
+  warmup_steps: 300
+  eval_every: 500
+  save_every: 500
+  log_every: 25
+  lr: 3.0e-4
+  lr_min: 3.0e-5
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: 1.0
+  amp_dtype: fp16
+  use_amp: true
+  num_workers: 2
+  use_wandb: false
+  keep_last_n_checkpoints: 3

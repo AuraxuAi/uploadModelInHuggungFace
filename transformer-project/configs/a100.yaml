@@ -1,0 +1,47 @@
+# Preset for a single A100 (40GB, e.g. Colab Pro). ~85M parameters.
+model:
+  vocab_size: 32000
+  context_len: 1024
+  n_layers: 12
+  n_heads: 12
+  n_kv_heads: 4
+  d_model: 768
+  d_ff_mult: 4.0
+  dropout: 0.1
+  attn_dropout: 0.05
+  rope_base: 10000
+  norm_eps: 1.0e-5
+  tie_weights: true
+
+data:
+  train_files: []
+  hf_dataset_name: HuggingFaceFW/fineweb
+  hf_dataset_split: train
+  hf_text_column: text
+  hf_max_samples: 500000
+  val_fraction: 0.02
+  tokenizer_path: artifacts/tokenizer.json
+  tokenizer_vocab_size: 32000
+  cache_dir: artifacts/cache
+
+train:
+  output_dir: artifacts/run_a100
+  seed: 42
+  batch_size: 32
+  grad_accum: 4
+  max_steps: 50000
+  warmup_steps: 1000
+  eval_every: 1000
+  save_every: 1000
+  log_every: 50
+  lr: 3.0e-4
+  lr_min: 3.0e-5
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: 1.0
+  amp_dtype: bf16
+  use_amp: true
+  num_workers: 4
+  use_wandb: false
+  keep_last_n_checkpoints: 3

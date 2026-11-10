@@ -1,0 +1,46 @@
+# Tiny config for smoke-testing the pipeline on a CPU-only machine.
+# This will NOT produce a good model — it's sized to finish in minutes on a
+# laptop CPU, purely to prove the train/save/generate loop works end to end.
+# For a real run, use configs/small_8layer.yaml or configs/a100.yaml on a cloud GPU.
+model:
+  vocab_size: 4000        # must match the tokenizer you trained
+  context_len: 64
+  n_layers: 2
+  n_heads: 4
+  n_kv_heads: 2
+  d_model: 128
+  d_ff_mult: 4.0
+  dropout: 0.1
+  attn_dropout: 0.05
+  rope_base: 10000
+  norm_eps: 1.0e-5
+  tie_weights: true
+
+data:
+  train_files: ["data/sample.txt"]
+  val_fraction: 0.05
+  tokenizer_path: artifacts/tokenizer.json
+  tokenizer_vocab_size: 4000
+  cache_dir: artifacts/cache
+
+train:
+  output_dir: artifacts/run_cpu_local
+  seed: 42
+  batch_size: 8
+  grad_accum: 1
+  max_steps: 200
+  warmup_steps: 20
+  eval_every: 50
+  save_every: 50
+  log_every: 10
+  lr: 3.0e-4
+  lr_min: 3.0e-5
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: 1.0
+  amp_dtype: fp32       # AMP/fp16 is CUDA-only in this project; plain fp32 on CPU
+  use_amp: false
+  num_workers: 0        # avoid multiprocessing overhead for a tiny CPU run
+  use_wandb: false
+  keep_last_n_checkpoints: 2

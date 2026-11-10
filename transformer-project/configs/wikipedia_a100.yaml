@@ -1,0 +1,53 @@
+# Wikipedia (English) preset, based on a100.yaml.
+# Uses wikimedia/wikipedia, which is organized as one *builder config* per
+# (dump date, language) — e.g. "20231101.en" — not as subdirectories, so
+# it's set via hf_dataset_config (NOT hf_data_dir, which is a different
+# mechanism used by code_8layer.yaml for bigcode/the-stack-dedup).
+# Columns are id/url/title/text; hf_text_column stays "text".
+model:
+  vocab_size: 32000
+  context_len: 1024
+  n_layers: 12
+  n_heads: 12
+  n_kv_heads: 4
+  d_model: 768
+  d_ff_mult: 4.0
+  dropout: 0.1
+  attn_dropout: 0.05
+  rope_base: 10000
+  norm_eps: 1.0e-5
+  tie_weights: true
+
+data:
+  train_files: []
+  hf_dataset_name: wikimedia/wikipedia
+  hf_dataset_config: "20231101.en"   # swap language/date; see the dataset's HF page for the full list
+  hf_dataset_split: train
+  hf_text_column: text
+  hf_max_samples: 300000    # fast iteration size (~370M tokens); raise later for a real run
+  val_fraction: 0.02
+  tokenizer_path: artifacts/tokenizer_wiki.json
+  tokenizer_vocab_size: 32000
+  cache_dir: artifacts/cache_wiki
+
+train:
+  output_dir: artifacts/run_wiki
+  seed: 42
+  batch_size: 8
+  grad_accum: 16
+  max_steps: 1000
+  warmup_steps: 1000
+  eval_every: 100
+  save_every: 200
+  log_every: 50
+  lr: 3.0e-4
+  lr_min: 3.0e-5
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: 1.0
+  amp_dtype: fp16
+  use_amp: true
+  num_workers: 4
+  use_wandb: false
+  keep_last_n_checkpoints: 3

@@ -1,0 +1,74 @@
+# ~493M-param model, 20B-token mixed corpus (~40 tokens/param).
+#
+# Sources (token budgets; see scripts/build_corpus_20b.py):
+#    9.8B raw Python        bigcode/the-stack-dedup          49.0%
+#    2.0B python-edu        HuggingFaceTB/smollm-corpus      10.0%
+#    1.5B commits           bigcode/commitpack                7.5%
+#    2.0B Stack Overflow    scripts/fetch_stackoverflow.py   10.0%   (Python-tagged only, <= Apr 2024; the real
+#                                                                     amount may be lower - set the budget to what you get)
+#   0.15B competitive       deepmind/code_contests            0.75%  (small: repeated to fit)
+#   0.05B competitive       codeparrot/apps                   0.25%  (small: repeated to fit)
+#    2.5B English web       HuggingFaceFW/fineweb-edu        12.5%
+#    0.5B Wikipedia         wikimedia/wikipedia               2.5%
+#    1.0B math              open-web-math                     5.0%
+#    0.5B issues/notebooks  optional extras - OFF by default (all languages)  2.5%
+#   -> code (raw + edu + commits + competitive) = 67.5% + 1.0%
+#
+# Build order:  build_corpus_20b.py (plan, probe, sample) -> tp-train-tokenizer
+#               -> build_corpus_20b.py tokenize -> build_data_mix.py --dtype uint16
+#
+# Parameter count (verify with model.num_parameters()):
+#   L=26, d_model=1280, 20 heads (head_dim 64), 5 KV heads, SwiGLU hidden 3456,
+#   vocab 32000 tied embeddings  ->  ~493M.
+#
+# Hardware: written for ONE 40-80 GB A100/H100 (bf16). Rough compute is
+# 6 * 0.5e9 * 20e9 = 6e19 FLOPs: expect on the order of 2-3 days on an H100 or
+# 5-8 days on an A100 (no torch.compile in this trainer, so be conservative).
+# Not feasible on Colab/T4; the trainer saves checkpoints so you can resume
+# on a preemptible machine (--resume).
+
+model:
+  vocab_size: 32000      # must match the tokenizer you train on the new mix
+  context_len: 2048      # 512 is too short for code at this scale
+  n_layers: 26
+  n_heads: 20
+  n_kv_heads: 5
+  d_model: 1280
+  d_ff_mult: 4.0         # NOTE: SwiGLUFFN uses hidden = (2/3) * d_ff_mult * d_model, so 4.0
+                         # gives the standard ~8/3 * d_model. (The old 2.67 shrank it twice.)
+  dropout: 0.0           # ~1 epoch over 20B tokens: dropout only slows learning here
+  attn_dropout: 0.0
+  rope_base: 10000
+  norm_eps: 1.0e-5
+  tie_weights: true
+
+data:
+  train_files:
+    - "artifacts/mix_20b/corpus.bin"
+  token_dtype: uint16
+  val_fraction: 0.001    # 0.1% of 20B = ~20M tokens; plenty for a stable val loss
+  tokenizer_path: artifacts/tokenizer_20b_32k.json
+  tokenizer_vocab_size: 32000
+  cache_dir: artifacts/cache_20b
+
+train:
+  output_dir: artifacts/run_500m_20b
+  seed: 42
+  batch_size: 8            # micro-batch; lower to 4 (and double grad_accum) on a 24 GB GPU
+  grad_accum: 32           # 8 * 32 * 2048 = 524,288 tokens per optimizer step
+  max_steps: 38147         # 20e9 / 524,288 = one pass over the mix
+  warmup_steps: 1000
+  eval_every: 1000
+  save_every: 1000
+  log_every: 50
+  lr: 3.0e-4
+  lr_min: 3.0e-5
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: 1.0
+  amp_dtype: bf16          # A100/H100 (fp16 + GradScaler is only for T4-class GPUs)
+  use_amp: true
+  num_workers: 4
+  use_wandb: false
+  keep_last_n_checkpoints: 3

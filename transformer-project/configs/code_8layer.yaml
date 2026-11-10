@@ -1,0 +1,54 @@
+# Code-focused variant of small_8layer.yaml.
+# Uses bigcode/the-stack-dedup (NOT the-stack-v2-dedup, which only ships
+# pointers, not actual file content — see project conversation history).
+# Requires: huggingface_hub login + accepting the dataset's terms on its HF
+# page before this will load. context_len is doubled vs. the prose config
+# since code needs more tokens of context per logical unit (a function,
+# a class) to be coherent.
+model:
+  vocab_size: 8000
+  context_len: 512
+  n_layers: 8
+  n_heads: 8
+  n_kv_heads: 2
+  d_model: 256
+  d_ff_mult: 4.0
+  dropout: 0.1
+  attn_dropout: 0.05
+  rope_base: 10000
+  norm_eps: 1.0e-5
+  tie_weights: true
+
+data:
+  train_files: []
+  hf_dataset_name: bigcode/the-stack-dedup
+  hf_dataset_split: train
+  hf_data_dir: data/python        # restrict to one language; remove for all languages (huge)
+  hf_text_column: content         # note: "content", not "text", for this dataset
+  hf_max_samples: 200000
+  val_fraction: 0.03
+  tokenizer_path: artifacts/tokenizer_code.json
+  tokenizer_vocab_size: 8000
+  cache_dir: artifacts/cache_code
+
+train:
+  output_dir: artifacts/run_code8L
+  seed: 42
+  batch_size: 16                  # smaller than small_8layer.yaml: longer context_len uses more memory per sample
+  grad_accum: 4
+  max_steps: 15000
+  warmup_steps: 300
+  eval_every: 500
+  save_every: 500
+  log_every: 25
+  lr: 3.0e-4
+  lr_min: 3.0e-5
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: 1.0
+  amp_dtype: fp16
+  use_amp: true
+  num_workers: 2
+  use_wandb: false
+  keep_last_n_checkpoints: 3

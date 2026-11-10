@@ -1,0 +1,5 @@
+[console_scripts]
+tp-export-hf = transformer_project.cli:export_main
+tp-generate = transformer_project.cli:generate_main
+tp-train = transformer_project.cli:train_main
+tp-train-tokenizer = transformer_project.cli:tokenizer_main

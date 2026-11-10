@@ -1,0 +1,207 @@
+Metadata-Version: 2.4
+Name: transformer-project
+Version: 0.1.0
+Summary: A from-scratch decoder-only transformer (GQA + RoPE + SwiGLU + RMSNorm) with a training and inference pipeline.
+Author: Your Name
+License: MIT
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: torch<3.0.0,>=2.2.0
+Requires-Dist: numpy<2.0.0,>=1.26.0
+Requires-Dist: tokenizers<1.0.0,>=0.19.1
+Requires-Dist: datasets<3.0.0,>=2.19.0
+Requires-Dist: pyyaml<7.0,>=6.0
+Requires-Dist: tqdm<5.0.0,>=4.66.0
+Requires-Dist: rich<14.0.0,>=13.7.0
+Provides-Extra: wandb
+Requires-Dist: wandb<0.18.0,>=0.17.0; extra == "wandb"
+Provides-Extra: dist
+Requires-Dist: accelerate<0.31.0,>=0.30.0; extra == "dist"
+Provides-Extra: hf
+Requires-Dist: transformers<5.0.0,>=4.41.0; extra == "hf"
+Requires-Dist: huggingface_hub<0.24.0,>=0.23.0; extra == "hf"
+Provides-Extra: dev
+Requires-Dist: pytest<9.0.0,>=8.0.0; extra == "dev"
+Requires-Dist: pytest-cov<6.0.0,>=5.0.0; extra == "dev"
+Requires-Dist: ruff<0.5.0,>=0.4.0; extra == "dev"
+Requires-Dist: mypy<2.0.0,>=1.10.0; extra == "dev"
+
+# transformer-project
+
+A from-scratch, decoder-only transformer (grouped-query attention + RoPE +
+SwiGLU + RMSNorm, in the LLaMA/Mistral family) with a training and
+inference pipeline, rewritten from a Colab notebook into an installable
+Python package.
+
+This is a **learning / small-scale research project**, not a
+frontier-scale training stack — but unlike the notebook it started as, it
+can be installed, imported, tested, and run outside of Colab.
+
+## What changed from the original notebook
+
+- **Installable package** (`src/` layout) instead of order-dependent
+  notebook cells and global state.
+- **Config via YAML + dataclasses**, validated at construction time,
+  instead of "edit cell 4 and re-run."
+- **Pinned dependencies** in `pyproject.toml` instead of
+  `!pip install -q ...` with no version pins.
+- **Real bug fixes**:
+  - RoPE is applied at the correct absolute position during KV-cached
+    generation (the notebook always rotated new tokens as if they were at
+    position 0, silently corrupting positional info after the first
+    generated token — see `tests/test_model.py::test_kv_cache_matches_full_forward`).
+  - RoPE caches are real `nn.Module` buffers, not a monkeypatched
+    `register_buffer` that was actually a plain `setattr`.
+  - Uses `torch.nn.functional.scaled_dot_product_attention` (gets an
+    efficient/flash backend for free on supported hardware) instead of a
+    hand-rolled attention path plus a fragile manual `flash_attn` import
+    check.
+  - Checkpoints are written atomically (temp file + `os.replace`) and
+    rotated, instead of `torch.save` straight to the final path with no
+    cap on disk usage.
+  - The HuggingFace "export" produces a real `PretrainedConfig` /
+    `PreTrainedModel` subclass that `save_pretrained`/`from_pretrained`
+    actually work with, instead of a hand-rolled `config.json` with field
+    names `transformers` doesn't read.
+- **Data provenance**: every tokenized corpus writes a `manifest.json`
+  recording exactly which source files went in and a content hash, so you
+  can answer "what did this train on?" after the fact. It does **not**
+  do license classification for you — see the warning below.
+- **Tests** for the model, config validation, RoPE, checkpointing, and
+  generation utilities (`pytest`).
+- **Structured logging** (Python `logging`) instead of scattered `print`s.
+
+## What's still out of scope
+
+This does not add distributed training (DDP/FSDP), a real serving stack,
+model/data versioning infra, or CI. Those are the next layer up if you
+want to go further; happy to help with any of them.
+
+## Install
+
+```bash
+pip install -e ".[dev]"
+# optional extras:
+pip install -e ".[wandb]"   # Weights & Biases logging
+pip install -e ".[hf]"      # HuggingFace export/import
+pip install -e ".[dist]"    # accelerate, for future multi-GPU work
+```
+
+## A note on training data
+
+If you point `data.train_files` at other people's source code (as the
+original notebook did by cloning GitHub repos), you are responsible for
+checking licenses before training on it and before distributing any
+resulting model. `manifest.json` gives you an audit trail of what went
+in; it is not a license checker.
+
+## Usage
+
+```bash
+# 1. Train a tokenizer on your own text/code files
+tp-train-tokenizer --files data/*.py data/*.md --vocab-size 32000 \
+    --out artifacts/tokenizer.json
+
+# 2. Train the model (edit configs/t4.yaml first, or copy it)
+tp-train --config configs/t4.yaml
+
+# 3. Generate text from a checkpoint
+tp-generate --config configs/t4.yaml \
+    --checkpoint artifacts/run_t4/checkpoints/ckpt_best.pt \
+    --prompt "def fibonacci(n):" --strategy sample
+
+# 4. Export to a real HuggingFace-compatible format
+tp-export-hf --config configs/t4.yaml \
+    --checkpoint artifacts/run_t4/checkpoints/ckpt_best.pt \
+    --out artifacts/hf_export
+```
+
+Or use it as a library:
+
+```python
+from transformer_project.config import RunConfig
+from transformer_project.model.transformer import Transformer
+
+cfg = RunConfig.from_yaml("configs/t4.yaml")
+model = Transformer(cfg.model)
+print(f"{model.num_parameters() / 1e6:.1f}M parameters")
+```
+
+## Tests
+
+```bash
+pytest
+```
+
+## Project layout
+
+```
+src/transformer_project/
+  config.py          # ModelConfig / DataConfig / TrainConfig / RunConfig (YAML in/out)
+  model/              # RMSNorm, RoPE, GQA attention, SwiGLU FFN, transformer block + full model
+  data/               # tokenizer wrapper, corpus tokenization + memory-mapped dataset
+  training/           # optimizer/LR schedule, checkpointing, metrics logging, Trainer
+  inference/          # greedy / sampling / beam-search generation
+  cli.py              # tp-train, tp-generate, tp-train-tokenizer, tp-export-hf
+configs/              # YAML presets (t4.yaml, a100.yaml)
+tests/                # pytest suite
+```
+
+## 500M-parameter / 20B-token run
+
+`configs/code_500m_20b.yaml` + `scripts/build_corpus_20b.py` build and train a ~493M-parameter
+model on a ~20B-token, 8-source mix (about 67% code). Steps:
+
+```bash
+python scripts/build_corpus_20b.py plan                    # table + the blend command
+python scripts/build_corpus_20b.py probe                   # CHECK dataset names/fields first
+python scripts/build_corpus_20b.py sample --out artifacts/tok_sample
+tp-train-tokenizer --files artifacts/tok_sample/*.txt --vocab-size 32000 --out artifacts/tokenizer_20b_32k.json
+python scripts/build_corpus_20b.py tokenize --tokenizer artifacts/tokenizer_20b_32k.json --out artifacts/src_20b --sync-dir /path/to/drive/src_20b   # resumable shards
+python scripts/build_corpus_20b.py merge --out artifacts/src_20b --sync-dir /path/to/drive/src_20b
+python scripts/build_data_mix.py ...                       # exact command printed by `plan`
+tp-train --config configs/code_500m_20b.yaml
+```
+
+Needs roughly 40 GB (per-source .bin files) + 40 GB (blended corpus) of disk, uint16 tokens.
+Retrain the tokenizer: the old one has no `<file_sep>`/`<commit_*>`/`<question>` tokens.
+
+On Google Colab use `transformer_project_500m_20b_colab.ipynb`: Part A (CPU runtime) builds the corpus with
+everything backed up to Drive; Part B (H100 runtime) restores it and trains with automatic checkpoint backups.
+
+### Stack Overflow and competitive-programming sources
+* `scripts/fetch_stackoverflow.py` builds PYTHON-tagged Stack Overflow Q&A pairs (Python 2 dropped by default) plus language-neutral SQL/regex/git/bash/algorithm questions that are not tagged with another language from the public per-year posts Parquet files
+  (data up to April 2024, CC BY-SA). Read the terms note at the top of that script before using it for training.
+* `code_contests` (deepmind/code_contests) and `apps` (codeparrot/apps) add competitive-programming problems with
+  correct Python solutions. They are small, so the mixer repeats them: after `tokenize`, set their budgets in
+  `scripts/build_corpus_20b.py` to at most ~3x their real size.
+
+## Fine-tuning (instruction / stop / edit behaviour) with pretraining data mixed back in
+* `scripts/build_sft_data.py` builds ~55k prompt/response pairs from data you already have (function bodies, Stack Overflow
+  answers, small commit edits, contest solutions), in the same formats as pretraining.
+* `configs/sft_500m.yaml` + `tp-train --config configs/run_sft.yaml --init-from <ckpt_final.pt>`: loss only on the response
+  (plus the end token); 25% of examples are ordinary pretraining chunks (`replay_corpus`, `replay_fraction`).
+* Notebook Part D walks through it. The old SFT path encoded prompt and response separately, which put an [EOS][BOS]
+  pair between them; `encode_sft_pair` fixes that.
+
+## ~2B-token fine-tuning (packed)
+* `scripts/build_sft_packed.py` builds ~1.7B real tokens of fine-tuning examples (function bodies, Stack Overflow answers,
+  small commit edits, contest solutions) and **packs several short examples per 2048-token row** (~99% fill instead of ~27%
+  when each example is padded to the window). Loss is only on responses (+ the end token). Writes
+  `<prefix>.{train,val}.{tokens,mask}.bin` + `<prefix>.meta.json`.
+* `configs/sft2b_500m.yaml` (`data.sft_packed_prefix`, 20% pretraining replay) + `tp-train --init-from <ckpt_final.pt>`.
+* Notebook Part E walks through it (build on CPU, train on GPU, compare with the base model).
+
+## Fine-tuning data quality rules (function examples)
+A function is used as a training example only if it has a real docstring and its body is **self-contained**: every module-level
+name it uses must be a builtin, a parameter/local, the function itself, or something imported by the import lines shown in the
+prompt. (An earlier version also kept bodies that used constants/helpers defined elsewhere in their file, e.g. `EMAIL_REGEX`;
+the fine-tuned model then invented undefined names.) See `build_sft_data.function_pairs` and `tests/test_sft_data_filters.py`.
+
+## Benchmarks (HumanEval / MBPP) and decoding
+* `scripts/eval_code_benchmarks.py` — `generate` (in-process, greedy or sampled), `score` (sandboxed, pass@1/5/10 with a 95% CI,
+  failure types) and `compare` (paired bootstrap between two models). Notebook Part F. Tests: `tests/test_eval_harness.py`.
+* Decoding: `generate()` / `tp-generate` now default to **repetition_penalty = 1.0**. The previous default (1.1, applied as 1.1**count to every
+  token generated so far) badly distorts code, where indentation, brackets and names must repeat. Pass `--repetition-penalty` to change it.
+  `generate()` also accepts `stop_strings` to end early.
+* Fine-tuning data: function pairs now also drop stub bodies (pass / ... / raise NotImplementedError).
